@@ -17,8 +17,9 @@ import { StaffSchedule } from './pages/StaffSchedule'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Don't retry client errors (403, 404…); they won't fix themselves.
-      retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
+      // Retry network failures and server errors (a sleeping server often answers the second time),
+      // but not client errors (403, 404…), which won't fix themselves.
+      retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
       refetchOnWindowFocus: false,
     },
   },
