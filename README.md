@@ -2,7 +2,9 @@
 
 An appointment booking system for service businesses (salons, clinics, studios). Customers book online, staff run their day from a schedule view, and owners see the business at a glance.
 
-**Live demo:** _coming soon_ · One-click demo logins for customer, staff and owner. No sign-up needed.
+**Live demo: [studio-booking-web.onrender.com](https://studio-booking-web.onrender.com)** · One-click demo logins for customer, staff and owner. No sign-up needed.
+
+> The API runs on a free instance that sleeps when idle, so the first visit can take up to a minute to wake it. Demo data resets every night.
 
 ![Booking flow](docs/screenshot-booking.png)
 
@@ -110,6 +112,17 @@ For Stripe webhooks in development: `stripe listen --forward-to localhost:8000/a
 Run the tests with `python manage.py test` (backend) and `npm run lint && npm run build` (frontend).
 
 `seed_demo` wipes and recreates all demo data, with stable IDs. Schedule it nightly on a public demo so visitors always start from a clean state.
+
+## Deployment
+
+| Part | Where | How |
+| --- | --- | --- |
+| Frontend | Render static site (CDN) | `render.yaml` → `studio-booking-web`, built with `npm ci && npm run build` |
+| API | Render web service (Ohio) | `render.yaml` → `studio-booking-api`, `backend/build.sh` then Gunicorn |
+| Database | Neon Postgres (Ohio) | App traffic over the pooled connection; migrations over the direct one |
+| Demo reset | GitHub Actions | `.github/workflows/reset-demo.yml`, nightly at 3 AM studio time |
+
+Pushing to `main` deploys both services. Configuration lives in environment variables: the frontend needs `VITE_API_URL`; the API needs `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `CORS_ALLOWED_ORIGINS` and `FRONTEND_URL` (see `render.yaml`).
 
 ## Roadmap
 
