@@ -4,6 +4,7 @@ import { ApiError } from '../api/client'
 import { useAvailability, useConfig, useCreateAppointment, useServices, useStaff } from '../api/hooks'
 import type { Appointment, AppConfig, Service, Slot, StaffMember } from '../api/types'
 import { useAuth } from '../auth/context'
+import { BookingConfirmation } from '../components/BookingConfirmation'
 import { DemoLogin } from '../components/DemoLogin'
 import { Button, Card, ErrorMessage, Loading, inputClass } from '../components/ui'
 import {
@@ -47,13 +48,20 @@ function BookingFlow({ config, services }: { config: AppConfig; services: Servic
 
   if (booked)
     return (
-      <Confirmation
+      <BookingConfirmation
         appointment={booked}
         config={config}
-        onBookAnother={() => {
-          setBooked(null)
-          setParams({}, { replace: true })
-        }}
+        secondaryAction={
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setBooked(null)
+              setParams({}, { replace: true })
+            }}
+          >
+            Book another
+          </Button>
+        }
       />
     )
 
@@ -318,13 +326,20 @@ function Summary({
   const location = useLocation()
   const create = useCreateAppointment()
   const [notes, setNotes] = useState('')
+  const [redirecting, setRedirecting] = useState(false)
   const ready = Boolean(service && staffMember && slotStart)
   const next = location.pathname + location.search
+  const deposit = config.payments_enabled && service ? Number(service.deposit) : 0
 
   async function confirm() {
     if (!service || !staffMember || !slotStart) return
     try {
-      onBooked(await create.mutateAsync({ service_id: service.id, staff_id: staffMember.id, start: slotStart, notes }))
+      const result = await create.mutateAsync({ service_id: service.id, staff_id: staffMember.id, start: slotStart, notes })
+      if (result.checkout_url) {
+        // The slot is now held for us; Stripe takes it from here and sends the customer back.
+        setRedirecting(true)
+        window.location.assign(result.checkout_url)
+      } else onBooked(result)
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) onConflict()
     }
@@ -340,9 +355,23 @@ function Summary({
         {service && <SummaryRow label="Duration" value={formatDuration(service.duration_minutes)} />}
       </dl>
       {service && (
-        <div className="mt-4 flex items-baseline justify-between border-t border-line pt-4">
-          <span className="text-sm text-ink-soft">Total</span>
-          <span className="text-lg font-semibold">{formatPrice(service.price)}</span>
+        <div className="mt-4 space-y-2 border-t border-line pt-4">
+          <div className="flex items-baseline justify-between">
+            <span className="text-sm text-ink-soft">Total</span>
+            <span className={deposit ? 'font-medium' : 'text-lg font-semibold'}>{formatPrice(service.price)}</span>
+          </div>
+          {deposit > 0 && (
+            <>
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm text-ink-soft">Deposit due now</span>
+                <span className="text-lg font-semibold">{formatPrice(deposit)}</span>
+              </div>
+              <div className="flex items-baseline justify-between text-sm">
+                <span className="text-ink-soft">Pay at the studio</span>
+                <span className="tabular-nums">{formatPrice(Number(service.price) - deposit)}</span>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -359,10 +388,27 @@ function Summary({
             />
           </label>
           <ErrorMessage error={create.error} />
-          <Button className="w-full" loading={create.isPending} onClick={confirm}>
-            Confirm booking
+          <Button className="w-full" loading={create.isPending || redirecting} onClick={confirm}>
+            {deposit > 0 ? `Continue to payment · ${formatPrice(deposit)}` : 'Confirm booking'}
           </Button>
-          <p className="text-xs text-ink-muted">Free cancellation up to {config.cancellation_cutoff_hours} hours before.</p>
+          <p className="text-xs text-ink-muted">
+            {deposit > 0
+              ? `${config.payment_provider === 'stripe' ? 'Secure payment by Stripe. ' : ''}Cancel up to ${config.cancellation_cutoff_hours} hours before for a full refund.`
+              : `Free cancellation up to ${config.cancellation_cutoff_hours} hours before.`}
+          </p>
+          {deposit > 0 && config.payment_provider === 'demo' && (
+            <p className="rounded-lg border border-dashed border-line-strong px-3 py-2 text-xs text-ink-soft">
+              <strong className="font-medium text-ink">Demo checkout:</strong> you'll see a simulated payment page. No card
+              needed and nothing is charged.
+            </p>
+          )}
+          {deposit > 0 && config.payment_provider === 'stripe' && config.payments_test_mode && (
+            <p className="rounded-lg border border-dashed border-line-strong px-3 py-2 text-xs text-ink-soft">
+              <strong className="font-medium text-ink">Test mode:</strong> pay with card{' '}
+              <span className="font-medium whitespace-nowrap text-ink tabular-nums">4242 4242 4242 4242</span>, any future
+              date and any CVC. No real money moves.
+            </p>
+          )}
         </div>
       )}
 
@@ -395,38 +441,6 @@ function SummaryRow({ label, value }: { label: string; value?: string }) {
     <div className="flex justify-between gap-4">
       <dt className="text-ink-soft">{label}</dt>
       <dd className={`text-right font-medium ${value ? '' : 'text-ink-muted'}`}>{value ?? '—'}</dd>
-    </div>
-  )
-}
-
-function Confirmation({
-  appointment,
-  config,
-  onBookAnother,
-}: {
-  appointment: Appointment
-  config: AppConfig
-  onBookAnother: () => void
-}) {
-  return (
-    <div className="mx-auto max-w-lg text-center">
-      <div className="mx-auto mb-6 grid size-14 place-items-center rounded-full bg-good-soft text-2xl text-good" aria-hidden="true">
-        ✓
-      </div>
-      <h1 className="font-display text-3xl font-semibold tracking-tight">You're booked in</h1>
-      <p className="mt-2 text-ink-soft">
-        {appointment.service.name} with {appointment.staff.name}
-        <br />
-        <strong className="text-ink">{formatDateTime(appointment.start, config.timezone)}</strong>
-      </p>
-      <div className="mt-8 flex justify-center gap-3">
-        <Link to="/appointments" className="inline-flex h-10 items-center rounded-lg bg-brand px-4 text-sm font-medium text-brand-ink hover:bg-brand-hover">
-          View my appointments
-        </Link>
-        <Button variant="secondary" onClick={onBookAnother}>
-          Book another
-        </Button>
-      </div>
     </div>
   )
 }

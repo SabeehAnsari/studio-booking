@@ -26,6 +26,8 @@ class Service(models.Model):
     description = models.TextField(blank=True)
     duration_minutes = models.PositiveIntegerField()
     price = models.DecimalField(max_digits=8, decimal_places=2)
+    # Paid online at booking time to secure the slot; the rest is paid at the studio. 0 = no deposit.
+    deposit = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -33,6 +35,9 @@ class Service(models.Model):
         constraints = [
             models.CheckConstraint(condition=Q(duration_minutes__gt=0), name="service_duration_positive"),
             models.CheckConstraint(condition=Q(price__gte=0), name="service_price_non_negative"),
+            models.CheckConstraint(
+                condition=Q(deposit__gte=0) & Q(deposit__lte=F("price")), name="service_deposit_within_price"
+            ),
         ]
 
     @property
@@ -112,14 +117,17 @@ class AppointmentQuerySet(models.QuerySet):
 
 class Appointment(models.Model):
     class Status(models.TextChoices):
+        AWAITING_PAYMENT = "awaiting_payment", "Awaiting payment"
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
         NO_SHOW = "no_show", "No-show"
+        # A payment hold that ran out before the deposit was paid. Not a real booking.
+        EXPIRED = "expired", "Payment not completed"
 
     # Statuses that occupy the staff member's calendar.
-    ACTIVE_STATUSES = [Status.PENDING, Status.CONFIRMED]
+    ACTIVE_STATUSES = [Status.AWAITING_PAYMENT, Status.PENDING, Status.CONFIRMED]
 
     customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="appointments")
     staff = models.ForeignKey(StaffMember, on_delete=models.PROTECT, related_name="appointments")
@@ -130,6 +138,8 @@ class Appointment(models.Model):
     # Snapshot of the service price at booking time, so later price changes don't rewrite history.
     price = models.DecimalField(max_digits=8, decimal_places=2)
     notes = models.TextField(blank=True)
+    # While awaiting payment, the slot is held until this moment, then released.
+    hold_expires_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -148,7 +158,7 @@ class Appointment(models.Model):
                     (TsTzRange("start", "end", RangeBoundary()), RangeOperators.OVERLAPS),
                     ("staff", RangeOperators.EQUAL),
                 ],
-                condition=Q(status__in=["pending", "confirmed"]),
+                condition=Q(status__in=["awaiting_payment", "pending", "confirmed"]),
                 violation_error_message="This staff member already has an appointment at that time.",
             ),
         ]

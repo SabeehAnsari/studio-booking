@@ -1,26 +1,33 @@
 import { useState } from 'react'
-import { useAppointmentAction, type AppointmentAction } from '../api/hooks'
+import { useAppointmentAction, usePayAppointment, type AppointmentAction } from '../api/hooks'
 import type { AppConfig, Appointment, Role } from '../api/types'
 import { formatDateTime, formatDuration, formatPrice, formatTime } from '../lib/dates'
 import { useToast } from '../lib/toast'
 import { ConfirmDialog } from './ConfirmDialog'
 import { Button, ErrorMessage, StatusBadge } from './ui'
 
-const actionLabels: Record<AppointmentAction, string> = {
+type RowAction = AppointmentAction | 'pay'
+
+const actionLabels: Record<RowAction, string> = {
+  pay: 'Pay deposit',
   confirm: 'Confirm',
   complete: 'Mark done',
   'no-show': 'No-show',
   cancel: 'Cancel',
 }
 
-const successMessages: Record<AppointmentAction, (a: Appointment) => string> = {
-  cancel: (a) => `${a.service.name} cancelled`,
+const successMessages: Record<AppointmentAction, (a: Appointment, refunded?: string | null) => string> = {
+  cancel: (a, refunded) =>
+    a.status === 'awaiting_payment'
+      ? 'Time released. Nothing was charged.'
+      : `${a.service.name} cancelled${refunded ? ` · ${formatPrice(refunded)} deposit refunded` : ''}`,
   confirm: (a) => `Confirmed ${a.customer.first_name || 'the customer'}'s ${a.service.name}`,
   complete: () => 'Marked as completed',
   'no-show': () => 'Marked as no-show',
 }
 
-function actionsFor(appointment: Appointment, role: Role, config: AppConfig): AppointmentAction[] {
+function actionsFor(appointment: Appointment, role: Role, config: AppConfig): RowAction[] {
+  if (appointment.status === 'awaiting_payment') return role === 'customer' ? ['pay', 'cancel'] : ['cancel']
   const active = appointment.status === 'pending' || appointment.status === 'confirmed'
   if (!active) return []
   const started = new Date(appointment.start) <= new Date()
@@ -28,7 +35,7 @@ function actionsFor(appointment: Appointment, role: Role, config: AppConfig): Ap
     const cutoff = new Date(appointment.start).getTime() - config.cancellation_cutoff_hours * 3_600_000
     return Date.now() < cutoff ? ['cancel'] : []
   }
-  const actions: AppointmentAction[] = []
+  const actions: RowAction[] = []
   if (appointment.status === 'pending') actions.push('confirm')
   if (started) actions.push('complete', 'no-show')
   else actions.push('cancel')
@@ -55,6 +62,19 @@ export function AppointmentList({
   )
 }
 
+function PaymentNote({ appointment: a, timeZone }: { appointment: Appointment; timeZone: string }) {
+  if (a.status === 'awaiting_payment' && a.hold_expires_at) {
+    return <p className="text-xs text-warn">Held until {formatTime(a.hold_expires_at, timeZone)}</p>
+  }
+  if (a.payment?.status === 'paid') {
+    return <p className="text-xs text-ink-muted">{formatPrice(a.payment.amount)} deposit paid</p>
+  }
+  if (a.payment?.status === 'refunded') {
+    return <p className="text-xs text-ink-muted">{formatPrice(a.payment.amount)} deposit refunded</p>
+  }
+  return null
+}
+
 function AppointmentRow({
   appointment: a,
   role,
@@ -67,35 +87,40 @@ function AppointmentRow({
   timeOnly: boolean
 }) {
   const mutation = useAppointmentAction()
+  const pay = usePayAppointment()
   const toast = useToast()
   const [pendingAction, setPendingAction] = useState<AppointmentAction | null>(null)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const actions = actionsFor(a, role, config)
   const tz = config.timezone
+  const unpaidHold = a.status === 'awaiting_payment'
+  const paidDeposit = a.payment?.status === 'paid' ? a.payment.amount : null
 
   function perform(action: AppointmentAction) {
     setPendingAction(action)
     mutation.mutate(
       { id: a.id, action },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
           setConfirmingCancel(false)
-          toast(successMessages[action](a))
+          toast(successMessages[action](a, result.refunded_amount), unpaidHold ? 'info' : 'success')
         },
         onSettled: () => setPendingAction(null),
       },
     )
   }
 
-  function run(action: AppointmentAction) {
-    if (action === 'cancel') {
+  function run(action: RowAction) {
+    if (action === 'pay') pay.mutate(a.id)
+    else if (action === 'cancel') {
       mutation.reset()
       setConfirmingCancel(true)
     } else perform(action)
   }
 
   const who = role === 'customer' ? `with ${a.staff.name}` : a.customer.full_name || a.customer.email
-  const inactive = a.status === 'cancelled' || a.status === 'no_show'
+  const inactive = a.status === 'cancelled' || a.status === 'no_show' || a.status === 'expired'
+  const rowError = pay.error ?? (confirmingCancel ? null : mutation.error)
 
   return (
     <li className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-4 sm:px-5">
@@ -114,7 +139,10 @@ function AppointmentRow({
         {a.notes && role !== 'customer' && <p className="mt-1 text-sm text-ink-muted italic">“{a.notes}”</p>}
       </div>
       <div className="flex items-center gap-3">
-        <span className="text-sm tabular-nums text-ink-soft">{formatPrice(a.price)}</span>
+        <div className="text-right">
+          <p className="text-sm tabular-nums text-ink-soft">{formatPrice(a.price)}</p>
+          <PaymentNote appointment={a} timeZone={tz} />
+        </div>
         <StatusBadge status={a.status} />
       </div>
       {actions.length > 0 && (
@@ -123,26 +151,28 @@ function AppointmentRow({
             <Button
               key={action}
               size="sm"
-              variant={action === 'cancel' ? 'danger' : action === 'complete' || action === 'confirm' ? 'primary' : 'secondary'}
-              loading={pendingAction === action}
-              disabled={mutation.isPending}
+              variant={
+                action === 'cancel' ? 'danger' : action === 'pay' || action === 'complete' || action === 'confirm' ? 'primary' : 'secondary'
+              }
+              loading={action === 'pay' ? pay.isPending : pendingAction === action}
+              disabled={mutation.isPending || pay.isPending}
               onClick={() => run(action)}
             >
-              {actionLabels[action]}
+              {action === 'cancel' && unpaidHold && role === 'customer' ? 'Release' : actionLabels[action]}
             </Button>
           ))}
         </div>
       )}
-      {mutation.error && !confirmingCancel && (
+      {rowError && (
         <div className="w-full">
-          <ErrorMessage error={mutation.error} />
+          <ErrorMessage error={rowError} />
         </div>
       )}
 
       <ConfirmDialog
         open={confirmingCancel}
-        title="Cancel this appointment?"
-        confirmLabel="Cancel appointment"
+        title={unpaidHold ? 'Release this time?' : 'Cancel this appointment?'}
+        confirmLabel={unpaidHold ? 'Release time' : 'Cancel appointment'}
         cancelLabel="Keep it"
         destructive
         pending={pendingAction === 'cancel'}
@@ -158,9 +188,15 @@ function AppointmentRow({
           </p>
         </div>
         <p className="mt-3">
-          {role === 'customer'
-            ? "The time will be released for someone else to book. You can always book again later."
-            : 'The customer will need to rebook. This can’t be undone.'}
+          {unpaidHold
+            ? 'No payment has been taken. The time goes back on the calendar for anyone to book.'
+            : paidDeposit
+              ? role === 'customer'
+                ? `Your ${formatPrice(paidDeposit)} deposit will be refunded to your card. Refunds usually arrive within 5–10 business days.`
+                : `The customer's ${formatPrice(paidDeposit)} deposit will be refunded automatically. This can’t be undone.`
+              : role === 'customer'
+                ? 'The time will be released for someone else to book. You can always book again later.'
+                : 'The customer will need to rebook. This can’t be undone.'}
         </p>
       </ConfirmDialog>
     </li>

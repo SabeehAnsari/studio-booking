@@ -5,6 +5,7 @@ from django.urls import include, path
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("accounts.urls")),
+    path("api/payments/", include("payments.urls")),
     path("api/", include("scheduling.urls")),
     path("health/", lambda request: JsonResponse({"status": "ok"})),
 ]

@@ -8,8 +8,10 @@ import { Toaster } from './components/Toaster'
 import { AdminDashboard } from './pages/AdminDashboard'
 import { Login, Register } from './pages/Auth'
 import { Book } from './pages/Book'
+import { DemoCheckout } from './pages/DemoCheckout'
 import { Home } from './pages/Home'
 import { MyAppointments } from './pages/MyAppointments'
+import { BookingConfirmed, PaymentCancelled } from './pages/PaymentReturn'
 import { StaffSchedule } from './pages/StaffSchedule'
 
 const queryClient = new QueryClient({
@@ -29,9 +31,34 @@ export default function App() {
         <AuthProvider>
           <Toaster>
             <Routes>
+              {/* Standalone like a real hosted checkout: no app header or footer. */}
+              <Route
+                path="demo-checkout/:sessionId"
+                element={
+                  <RequireRole roles={['customer']}>
+                    <DemoCheckout />
+                  </RequireRole>
+                }
+              />
               <Route element={<Layout />}>
                 <Route index element={<Home />} />
                 <Route path="book" element={<Book />} />
+                <Route
+                  path="booking/confirmed"
+                  element={
+                    <RequireRole roles={['customer']}>
+                      <BookingConfirmed />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="booking/payment-cancelled"
+                  element={
+                    <RequireRole roles={['customer']}>
+                      <PaymentCancelled />
+                    </RequireRole>
+                  }
+                />
                 <Route path="login" element={<Login />} />
                 <Route path="register" element={<Register />} />
                 <Route

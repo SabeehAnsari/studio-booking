@@ -5,7 +5,9 @@ import type {
   Appointment,
   AvailabilityResponse,
   Dashboard,
+  DemoCheckoutSession,
   Paginated,
+  PaymentSummary,
   Service,
   StaffMember,
 } from './types'
@@ -54,6 +56,25 @@ export function useAppointments(filters: AppointmentFilters = {}) {
   })
 }
 
+export function useAppointment(id: number | undefined) {
+  return useQuery({
+    queryKey: ['appointments', 'detail', id],
+    queryFn: () => api<Appointment>(`/appointments/${id}/`),
+    enabled: id !== undefined,
+  })
+}
+
+export function useCheckoutStatus(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['checkout', sessionId],
+    queryFn: () =>
+      api<{ payment_status: PaymentSummary['status']; appointment: Appointment }>(`/payments/checkout/${sessionId}/`),
+    enabled: Boolean(sessionId),
+    // Stripe can take a moment to report the payment; keep checking until it settles.
+    refetchInterval: (query) => (query.state.data?.payment_status === 'pending' ? 2000 : false),
+  })
+}
+
 export function useDashboard() {
   return useQuery({ queryKey: ['dashboard'], queryFn: () => api<Dashboard>('/dashboard/') })
 }
@@ -62,7 +83,7 @@ export function useCreateAppointment() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: { service_id: number; staff_id: number; start: string; notes?: string }) =>
-      api<Appointment>('/appointments/', { method: 'POST', json: body }),
+      api<Appointment & { checkout_url: string | null }>('/appointments/', { method: 'POST', json: body }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['appointments'] })
       qc.invalidateQueries({ queryKey: ['availability'] })
@@ -77,11 +98,34 @@ export function useAppointmentAction() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, action }: { id: number; action: AppointmentAction }) =>
-      api<Appointment>(`/appointments/${id}/${action}/`, { method: 'POST' }),
+      api<Appointment & { refunded_amount?: string | null }>(`/appointments/${id}/${action}/`, { method: 'POST' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['appointments'] })
       qc.invalidateQueries({ queryKey: ['availability'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
     },
+  })
+}
+
+/** Reopens Stripe Checkout for a booking still awaiting its deposit, then leaves the app. */
+export function usePayAppointment() {
+  return useMutation({
+    mutationFn: (id: number) => api<{ checkout_url: string }>(`/appointments/${id}/pay/`, { method: 'POST' }),
+    onSuccess: ({ checkout_url }) => window.location.assign(checkout_url),
+  })
+}
+
+export function useDemoCheckout(sessionId: string | undefined) {
+  return useQuery({
+    queryKey: ['demo-checkout', sessionId],
+    queryFn: () => api<DemoCheckoutSession>(`/payments/demo-checkout/${sessionId}/`),
+    enabled: Boolean(sessionId),
+  })
+}
+
+export function useDemoCheckoutPay(sessionId: string) {
+  return useMutation({
+    mutationFn: (outcome: 'success' | 'decline') =>
+      api<{ redirect_url: string }>(`/payments/demo-checkout/${sessionId}/pay/`, { method: 'POST', json: { outcome } }),
   })
 }

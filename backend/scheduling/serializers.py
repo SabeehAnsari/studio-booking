@@ -1,8 +1,10 @@
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import APIException
 
 from accounts.serializers import UserSerializer
+from payments.services import deposit_required, hold_duration, release_expired_holds
 
 from .availability import is_slot_available, next_available_slot
 from .models import Appointment, Service, StaffMember, WorkingHours
@@ -18,7 +20,10 @@ class ServiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Service
-        fields = ["id", "name", "category", "category_label", "description", "duration_minutes", "price", "is_active"]
+        fields = [
+            "id", "name", "category", "category_label", "description", "duration_minutes", "price", "deposit",
+            "is_active",
+        ]
 
 
 class ServiceMenuSerializer(ServiceSerializer):
@@ -61,14 +66,22 @@ class AppointmentSerializer(serializers.ModelSerializer):
     staff_id = serializers.PrimaryKeyRelatedField(
         source="staff", queryset=StaffMember.objects.filter(is_active=True), write_only=True
     )
+    payment = serializers.SerializerMethodField()
 
     class Meta:
         model = Appointment
         fields = [
             "id", "service", "staff", "customer", "service_id", "staff_id",
-            "start", "end", "status", "price", "notes", "cancelled_at", "created_at",
+            "start", "end", "status", "price", "notes", "hold_expires_at", "payment", "cancelled_at", "created_at",
         ]
-        read_only_fields = ["end", "status", "price", "cancelled_at", "created_at"]
+        read_only_fields = ["end", "status", "price", "hold_expires_at", "cancelled_at", "created_at"]
+
+    def get_payment(self, appointment):
+        """The most recent deposit payment, if any. Uses the prefetched `payments` when available."""
+        latest = next(iter(appointment.payments.all()), None)
+        if latest is None:
+            return None
+        return {"status": latest.status, "amount": latest.amount, "currency": latest.currency}
 
     def validate(self, attrs):
         service, staff = attrs["service"], attrs["staff"]
@@ -78,11 +91,16 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         service = validated_data["service"]
+        release_expired_holds()
         # Checked here rather than in validate() so the 409 status isn't flattened into a 400.
         if not is_slot_available(service, validated_data["staff"], validated_data["start"]):
             raise SlotUnavailable("That time is no longer available. Please pick another slot.")
         validated_data["end"] = validated_data["start"] + service.duration
         validated_data["price"] = service.price
+        if deposit_required(service):
+            # Hold the slot while the customer pays; confirmed once Stripe reports the payment.
+            validated_data["status"] = Appointment.Status.AWAITING_PAYMENT
+            validated_data["hold_expires_at"] = timezone.now() + hold_duration()
         try:
             with transaction.atomic():
                 return super().create(validated_data)

@@ -86,6 +86,8 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
 }
 
 const statusStyles: Record<AppointmentStatus, { label: string; className: string; icon: string }> = {
+  awaiting_payment: { label: 'Awaiting deposit', className: 'bg-warn-soft text-warn', icon: '◷' },
+  expired: { label: 'Not paid', className: 'bg-line text-ink-muted', icon: '–' },
   pending: { label: 'Pending', className: 'bg-warn-soft text-warn', icon: '◷' },
   confirmed: { label: 'Confirmed', className: 'bg-brand-soft text-brand', icon: '✓' },
   completed: { label: 'Completed', className: 'bg-good-soft text-good', icon: '✓' },
