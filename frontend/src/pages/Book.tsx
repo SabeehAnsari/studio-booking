@@ -21,10 +21,10 @@ import {
 } from '../lib/dates'
 
 export function Book() {
-  const { data: config } = useConfig()
+  const { data: config, error: configError } = useConfig()
   const services = useServices()
+  if (services.error || configError) return <ErrorMessage error={services.error ?? configError} />
   if (!config || services.isPending) return <Loading />
-  if (services.error) return <ErrorMessage error={services.error} />
   return <BookingFlow config={config} services={services.data ?? []} />
 }
 

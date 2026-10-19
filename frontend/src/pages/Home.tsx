@@ -16,7 +16,7 @@ function earliestOpening(services: Service[]) {
 
 export function Home() {
   const { user } = useAuth()
-  const { data: config } = useConfig()
+  const { data: config, error: configError } = useConfig()
   const services = useServices()
   const nextOpening = services.data && earliestOpening(services.data)
 
@@ -68,10 +68,10 @@ export function Home() {
           </h2>
           <p className="mt-1 text-ink-soft">Tap a time to book it straight away, or see every opening.</p>
         </div>
-        {services.isPending || !config ? (
+        {services.error || configError ? (
+          <ErrorMessage error={services.error ?? configError} />
+        ) : services.isPending || !config ? (
           <Loading />
-        ) : services.error ? (
-          <ErrorMessage error={services.error} />
         ) : (
           <ServiceMenu services={services.data} timeZone={config.timezone} />
         )}
