@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useConfig } from '../api/hooks'
 import { useAuth } from '../auth/context'
 import { Button } from './ui'
+import { WakingUpNotice } from './WakingUpNotice'
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
   `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -15,6 +16,7 @@ export function Layout() {
 
   return (
     <div className="flex min-h-dvh flex-col">
+      <WakingUpNotice />
       {config?.demo_mode && user?.is_demo && (
         <div className="bg-ink px-4 py-1.5 text-center text-xs text-canvas">
           You're exploring a demo as <strong className="font-semibold">{user.full_name}</strong> ({user.role}). Data resets
