@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "accounts",
     "scheduling",
+    "payments",
 ]
 
 MIDDLEWARE = [
@@ -105,6 +106,26 @@ CANCELLATION_CUTOFF_HOURS = 2
 
 # Enables one-click demo logins. Turn off for a real client deployment.
 DEMO_MODE = env_bool("DEMO_MODE")
+
+# Payments. Provider is "stripe", "demo" (simulated checkout, no money moves) or "none".
+# Defaults: Stripe if a key is set, otherwise the demo provider in demo mode, otherwise off.
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+PAYMENT_PROVIDER = os.environ.get("PAYMENT_PROVIDER") or (
+    "stripe" if STRIPE_SECRET_KEY else "demo" if DEMO_MODE else "none"
+)
+if PAYMENT_PROVIDER not in {"stripe", "demo", "none"}:
+    raise RuntimeError(f"PAYMENT_PROVIDER must be stripe, demo or none (got {PAYMENT_PROVIDER!r})")
+if PAYMENT_PROVIDER == "stripe" and not STRIPE_SECRET_KEY:
+    raise RuntimeError("PAYMENT_PROVIDER=stripe needs STRIPE_SECRET_KEY")
+PAYMENTS_ENABLED = PAYMENT_PROVIDER != "none"
+PAYMENT_CURRENCY = os.environ.get("PAYMENT_CURRENCY", "usd")
+# Stripe Checkout sessions must live at least 30 minutes. The slot hold outlives the
+# session by a grace period, so a payment completed at the last second still finds its slot.
+CHECKOUT_SESSION_MINUTES = 30
+PAYMENT_HOLD_GRACE_MINUTES = 5
+# Where Stripe sends the customer back to after checkout.
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

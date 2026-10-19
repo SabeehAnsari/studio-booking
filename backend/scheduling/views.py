@@ -10,6 +10,8 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from payments import services as payments
+
 from .availability import bookable_staff, business_tz, compute_slots, local_day_bounds
 from .models import Appointment, Service, StaffMember
 from .permissions import IsBusinessAdmin, can_manage
@@ -28,6 +30,10 @@ def config_view(request):
             "max_days_ahead": settings.MAX_BOOKING_DAYS_AHEAD,
             "cancellation_cutoff_hours": settings.CANCELLATION_CUTOFF_HOURS,
             "demo_mode": settings.DEMO_MODE,
+            "payments_enabled": settings.PAYMENTS_ENABLED,
+            "payment_provider": settings.PAYMENT_PROVIDER if settings.PAYMENTS_ENABLED else None,
+            "payments_test_mode": settings.PAYMENT_PROVIDER == "demo" or settings.STRIPE_SECRET_KEY.startswith("sk_test_"),
+            "currency": settings.PAYMENT_CURRENCY,
         }
     )
 
@@ -41,6 +47,7 @@ class ServiceViewSet(viewsets.ReadOnlyModelViewSet):
         return Service.objects.filter(is_active=True)
 
     def list(self, request, *args, **kwargs):
+        payments.release_expired_holds()
         # Menu order: by category (in declaration order), then by name.
         category_order = {value: index for index, value in enumerate(Service.Category.values)}
         services = sorted(self.get_queryset(), key=lambda s: (category_order[s.category], s.name))
@@ -83,6 +90,7 @@ class AvailabilityView(APIView):
     MAX_RANGE_DAYS = 42
 
     def get(self, request):
+        payments.release_expired_holds()
         params = request.query_params
         try:
             service = Service.objects.get(pk=params.get("service"), is_active=True)
@@ -117,7 +125,7 @@ class AppointmentViewSet(
     def get_queryset(self):
         user = self.request.user
         qs = Appointment.objects.select_related("service", "staff__user", "customer").prefetch_related(
-            "staff__services", "staff__working_hours"
+            "staff__services", "staff__working_hours", "payments"
         )
         if user.is_business_admin:
             pass
@@ -142,30 +150,72 @@ class AppointmentViewSet(
             qs = qs.filter(staff_id=params["staff"])
         return qs
 
-    def perform_create(self, serializer):
-        serializer.save(customer=self.request.user)
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        payments.release_expired_holds()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        appointment = serializer.save(customer=request.user)
+        checkout_url = None
+        if appointment.status == Appointment.Status.AWAITING_PAYMENT:
+            try:
+                checkout_url = payments.start_checkout(appointment).checkout_url
+            except payments.PaymentError as exc:
+                # Don't leave a hold behind for a checkout that never opened.
+                appointment.status = Appointment.Status.EXPIRED
+                appointment.hold_expires_at = None
+                appointment.save(update_fields=["status", "hold_expires_at", "updated_at"])
+                return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        data = self.get_serializer(self.get_queryset().get(pk=appointment.pk)).data
+        return Response({**data, "checkout_url": checkout_url}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def pay(self, request, pk=None):
+        """Reopen the Stripe checkout for a booking still awaiting its deposit."""
+        appointment = self.get_object()
+        if appointment.customer_id != request.user.id:
+            raise PermissionDenied("Only the customer can pay for this booking.")
+        try:
+            payment = payments.resume_checkout(appointment)
+        except payments.PaymentError as exc:
+            raise ValidationError({"detail": str(exc)})
+        return Response({"checkout_url": payment.checkout_url})
 
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):
         appointment = self.get_object()
         if not appointment.is_active:
             raise ValidationError({"detail": "Only upcoming appointments can be cancelled."})
-        if not can_manage(request.user, appointment):
+        awaiting_payment = appointment.status == Appointment.Status.AWAITING_PAYMENT
+        if not can_manage(request.user, appointment) and not awaiting_payment:
             cutoff = appointment.start - timedelta(hours=settings.CANCELLATION_CUTOFF_HOURS)
             if timezone.now() > cutoff:
                 raise ValidationError(
                     {"detail": f"Appointments can't be cancelled within {settings.CANCELLATION_CUTOFF_HOURS} hours "
                                "of the start time. Please contact us directly."}
                 )
-        appointment.status = Appointment.Status.CANCELLED
+        try:
+            # Refund first: if Stripe fails, the booking stays as it was rather than being
+            # cancelled without the customer getting their deposit back.
+            refunded = payments.cancel_payments(appointment)
+        except payments.PaymentError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        # Abandoning an unpaid hold isn't a real cancellation, so it doesn't count against the business.
+        appointment.status = Appointment.Status.EXPIRED if awaiting_payment else Appointment.Status.CANCELLED
+        appointment.hold_expires_at = None
         appointment.cancelled_at = timezone.now()
-        appointment.save(update_fields=["status", "cancelled_at", "updated_at"])
-        return Response(self.get_serializer(appointment).data)
+        appointment.save(update_fields=["status", "hold_expires_at", "cancelled_at", "updated_at"])
+        data = self.get_serializer(self.get_queryset().get(pk=appointment.pk)).data
+        return Response({**data, "refunded_amount": refunded})
 
     def _staff_transition(self, request, new_status, *, must_have_started: bool):
         appointment = self.get_object()
         if not can_manage(request.user, appointment):
             raise PermissionDenied("Only staff can update this appointment.")
+        if appointment.status == Appointment.Status.AWAITING_PAYMENT:
+            raise ValidationError({"detail": "This booking is still waiting for the customer's deposit."})
         if not appointment.is_active or appointment.status == new_status:
             raise ValidationError({"detail": f"Appointment is already {appointment.get_status_display().lower()}."})
         if must_have_started and appointment.start > timezone.now():
@@ -198,7 +248,8 @@ class DashboardView(APIView):
         last_30 = now - timedelta(days=30)
         horizon_end = local_day_bounds(today + timedelta(days=13))[1]
 
-        appointments = Appointment.objects.all()
+        # Unpaid holds that lapsed were never real bookings; leave them out of every metric.
+        appointments = Appointment.objects.exclude(status=Appointment.Status.EXPIRED)
         active = appointments.filter(status__in=Appointment.ACTIVE_STATUSES)
 
         recent = appointments.filter(start__gte=last_30, start__lt=now)

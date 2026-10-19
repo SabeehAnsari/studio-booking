@@ -220,11 +220,13 @@ function AllAppointments({ config }: { config: AppConfig }) {
           </select>
           <select className={selectClass} value={filters.status} onChange={(e) => set({ status: e.target.value })} aria-label="Status">
             <option value="">Any status</option>
+            <option value="awaiting_payment">Awaiting deposit</option>
             <option value="pending">Pending</option>
             <option value="confirmed">Confirmed</option>
             <option value="completed">Completed</option>
             <option value="cancelled">Cancelled</option>
             <option value="no_show">No-show</option>
+            <option value="expired">Not paid</option>
           </select>
         </div>
       </div>

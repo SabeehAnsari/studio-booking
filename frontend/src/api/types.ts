@@ -26,6 +26,10 @@ export interface AppConfig {
   max_days_ahead: number
   cancellation_cutoff_hours: number
   demo_mode: boolean
+  payments_enabled: boolean
+  payment_provider: 'stripe' | 'demo' | null
+  payments_test_mode: boolean
+  currency: string
 }
 
 export interface Service {
@@ -36,6 +40,8 @@ export interface Service {
   description: string
   duration_minutes: number
   price: string
+  /** Paid online when booking; the rest is due at the studio. "0.00" = no deposit. */
+  deposit: string
   is_active: boolean
   /** Only present on the /services/ listing. */
   next_available?: { start: string; staff_id: number } | null
@@ -68,7 +74,20 @@ export interface AvailabilityResponse {
   days: { date: string; slots: Slot[] }[]
 }
 
-export type AppointmentStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
+export type AppointmentStatus =
+  | 'awaiting_payment'
+  | 'pending'
+  | 'confirmed'
+  | 'completed'
+  | 'cancelled'
+  | 'no_show'
+  | 'expired'
+
+export interface PaymentSummary {
+  status: 'pending' | 'paid' | 'expired' | 'refunded'
+  amount: string
+  currency: string
+}
 
 export interface Appointment {
   id: number
@@ -80,6 +99,8 @@ export interface Appointment {
   status: AppointmentStatus
   price: string
   notes: string
+  hold_expires_at: string | null
+  payment: PaymentSummary | null
   cancelled_at: string | null
   created_at: string
 }
@@ -101,4 +122,16 @@ export interface Dashboard {
   upcoming_by_day: { date: string; count: number }[]
   top_services: { name: string; count: number }[]
   staff_load: { id: number; name: string; count: number }[]
+}
+
+export interface DemoCheckoutSession {
+  id: string
+  status: 'open' | 'complete' | 'expired'
+  amount: string
+  currency: string
+  product_name: string
+  description: string
+  customer_email: string
+  expires_at: string
+  cancel_url: string
 }

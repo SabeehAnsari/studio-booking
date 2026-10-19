@@ -17,21 +17,22 @@ from django.utils import timezone
 
 from accounts.models import DEMO_EMAIL_DOMAIN
 from scheduling.availability import business_tz
+from payments.models import DemoCheckoutSession, Payment
 from scheduling.models import Appointment, Service, StaffMember, TimeOff, WorkingHours
 
 User = get_user_model()
 
 
-# (name, category, description, minutes, price, relative popularity)
+# (name, category, description, minutes, price, deposit, relative popularity)
 SERVICES = [
-    ("Signature Massage", "massage", "Full-body relaxation massage with warm oils.", 60, "90.00", 5),
-    ("Deep Tissue Massage", "massage", "Targeted pressure for chronic tension and recovery.", 90, "130.00", 3),
-    ("Hot Stone Massage", "massage", "Heated basalt stones melt away deep muscle tension.", 75, "110.00", 2),
-    ("Express Facial", "skin", "Cleanse, exfoliate and hydrate in under an hour.", 45, "70.00", 5),
-    ("Hydrating Facial", "skin", "Deep hydration with a calming mask and facial massage.", 60, "95.00", 3),
-    ("Haircut & Style", "hair", "Consultation, wash, cut and blow-dry.", 45, "55.00", 6),
-    ("Colour & Gloss", "hair", "All-over colour or gloss refresh, finished with a blow-dry.", 90, "120.00", 2),
-    ("Free Consultation", "consultation", "A short chat to plan your treatment.", 15, "0.00", 1),
+    ("Signature Massage", "massage", "Full-body relaxation massage with warm oils.", 60, "90.00", "20.00", 5),
+    ("Deep Tissue Massage", "massage", "Targeted pressure for chronic tension and recovery.", 90, "130.00", "30.00", 3),
+    ("Hot Stone Massage", "massage", "Heated basalt stones melt away deep muscle tension.", 75, "110.00", "25.00", 2),
+    ("Express Facial", "skin", "Cleanse, exfoliate and hydrate in under an hour.", 45, "70.00", "15.00", 5),
+    ("Hydrating Facial", "skin", "Deep hydration with a calming mask and facial massage.", 60, "95.00", "20.00", 3),
+    ("Haircut & Style", "hair", "Consultation, wash, cut and blow-dry.", 45, "55.00", "10.00", 6),
+    ("Colour & Gloss", "hair", "All-over colour or gloss refresh, finished with a blow-dry.", 90, "120.00", "30.00", 2),
+    ("Free Consultation", "consultation", "A short chat to plan your treatment.", 15, "0.00", "0.00", 1),
 ]
 
 # (username, first, last, title, service indexes, weekly shifts {weekday: [(start, end), ...]})
@@ -67,15 +68,20 @@ class Command(BaseCommand):
         # like /book?service=1 keep working after the nightly reseed.
         tables = [
             m._meta.db_table
-            for m in (Appointment, TimeOff, WorkingHours, StaffMember.services.through, StaffMember, Service)
+            for m in (
+                Payment, DemoCheckoutSession, Appointment, TimeOff, WorkingHours,
+                StaffMember.services.through, StaffMember, Service,
+            )
         ]
         with connection.cursor() as cursor:
             cursor.execute(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE")
         User.objects.filter(email__endswith=f"@{DEMO_EMAIL_DOMAIN}").delete()
 
         services = [
-            Service.objects.create(name=n, category=c, description=d, duration_minutes=m, price=Decimal(p))
-            for n, c, d, m, p, _ in SERVICES
+            Service.objects.create(
+                name=n, category=c, description=d, duration_minutes=m, price=Decimal(p), deposit=Decimal(dep)
+            )
+            for n, c, d, m, p, dep, _ in SERVICES
         ]
         popularity = {service.id: weight for service, (*_, weight) in zip(services, SERVICES)}
 
@@ -148,9 +154,11 @@ class Command(BaseCommand):
         mine_future = Appointment.objects.filter(start__gt=earliest_future).active().order_by("?")[:2]
         Appointment.objects.filter(pk__in=[a.pk for a in [*mine_past, *mine_future]]).update(customer=demo_customer)
 
+        payments = self._seed_deposits()
+
         self.stdout.write(self.style.SUCCESS(
             f"Seeded {len(services)} services, {len(staff_members)} staff, {len(customers)} customers, "
-            f"{created} appointments."
+            f"{created} appointments, {payments} deposits."
         ))
 
     @staticmethod
@@ -176,3 +184,29 @@ class Command(BaseCommand):
         user.set_unusable_password()
         user.save()
         return user
+
+    @staticmethod
+    def _seed_deposits() -> int:
+        """Seeded bookings for services with a deposit look paid (or refunded, if cancelled), as if
+        they'd gone through the demo checkout, so cancelling one in the demo really refunds it."""
+        deposits = []
+        for appointment in Appointment.objects.select_related("service").filter(service__deposit__gt=0):
+            refunded = appointment.status == Appointment.Status.CANCELLED
+            paid_at = appointment.created_at
+            deposits.append(
+                Payment(
+                    appointment=appointment,
+                    provider="demo",
+                    amount=appointment.service.deposit,
+                    currency="usd",
+                    status=Payment.Status.REFUNDED if refunded else Payment.Status.PAID,
+                    checkout_session_id=f"demo_cs_seed_{appointment.id}",
+                    payment_reference=f"demo_pi_seed_{appointment.id}",
+                    refund_reference=f"demo_re_seed_{appointment.id}" if refunded else "",
+                    expires_at=paid_at,
+                    paid_at=paid_at,
+                    refunded_at=appointment.updated_at if refunded else None,
+                )
+            )
+        Payment.objects.bulk_create(deposits)
+        return len(deposits)
