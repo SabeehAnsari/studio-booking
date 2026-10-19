@@ -82,8 +82,15 @@ DATABASES = {
     "default": dj_database_url.config(
         default="postgres://booking:booking@localhost:5433/booking",
         conn_max_age=600,
+        # Neon scales to zero when idle, which closes open connections. Check before reuse
+        # so the first request after a quiet spell reconnects instead of erroring.
+        conn_health_checks=True,
     )
 }
+# Neon's pooled endpoint (hostname ends in -pooler) is PgBouncer in transaction mode, which
+# can't hold server-side cursors across transactions. Migrations use the direct URL instead (build.sh).
+if "-pooler" in DATABASES["default"].get("HOST", ""):
+    DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 
 AUTH_USER_MODEL = "accounts.User"
 

@@ -19,7 +19,10 @@ services:
         value: "True"
       - key: BUSINESS_TIMEZONE
         value: America/New_York
+      # From Neon: the pooled string (host ends in -pooler) for the app, the direct one for migrations.
       - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
         sync: false
       # The Vercel URL of the frontend, e.g. https://studio-booking.vercel.app
       - key: CORS_ALLOWED_ORIGINS

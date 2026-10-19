@@ -17,3 +17,4 @@ frontend/dist/
 .idea/
 .DS_Store
 Thumbs.db
+.neon
