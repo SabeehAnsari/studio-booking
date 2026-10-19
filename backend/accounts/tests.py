@@ -49,6 +49,36 @@ class AuthTests(TestCase):
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.CUSTOMER)
 
+    def test_demo_accounts_cannot_see_real_users_contact_details(self):
+        from scheduling.models import Appointment, Service, StaffMember
+
+        real = User.objects.create_user("jane@gmail.com", "jane@gmail.com", "x", first_name="Jane", phone="+92 300 1234567")
+        demo_admin = User.objects.create_user(
+            "demo-admin", "demo-admin@demo.example.com", None, role=User.Role.ADMIN
+        )
+        staff = StaffMember.objects.create(
+            user=User.objects.create_user("s", "s@demo.example.com", None, role=User.Role.STAFF)
+        )
+        service = Service.objects.create(name="Cut", duration_minutes=30, price=10)
+        from django.utils import timezone
+
+        start = timezone.now()
+        Appointment.objects.create(
+            customer=real, staff=staff, service=service, start=start, end=start + service.duration, price=10
+        )
+
+        client = APIClient()
+        client.force_authenticate(demo_admin)
+        customer = client.get("/api/appointments/").data["results"][0]["customer"]
+        self.assertEqual(customer["email"], "j•••@gmail.com")
+        self.assertEqual(customer["username"], "j•••@gmail.com")
+        self.assertEqual(customer["phone"], "")
+        self.assertEqual(customer["first_name"], "Jane")
+
+        # Real users still see their own details in full.
+        client.force_authenticate(real)
+        self.assertEqual(client.get("/api/auth/me/").data["email"], "jane@gmail.com")
+
     @override_settings(DEMO_MODE=False)
     def test_demo_login_disabled_outside_demo_mode(self):
         response = APIClient().post("/api/auth/demo-login/", {"role": "admin"})

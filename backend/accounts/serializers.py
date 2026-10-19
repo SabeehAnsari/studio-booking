@@ -32,6 +32,22 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["id", "username", "email", "first_name", "last_name", "full_name", "phone", "role", "is_demo"]
         read_only_fields = ["id", "username", "role"]
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None)
+        # On the public demo anyone can log in as the demo owner or staff. Don't let them read the
+        # contact details of real people who signed up to try it.
+        if viewer and getattr(viewer, "is_demo", False) and not instance.is_demo and viewer.pk != instance.pk:
+            masked = _mask_email(instance.email)
+            data.update(email=masked, username=masked, phone="")
+        return data
+
+
+def _mask_email(email: str) -> str:
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}•••@{domain}" if domain else "•••"
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)

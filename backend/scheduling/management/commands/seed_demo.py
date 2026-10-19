@@ -58,9 +58,15 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible data.")
+        parser.add_argument(
+            "--if-empty", action="store_true", help="Only seed a fresh database; leave existing data alone."
+        )
 
     @transaction.atomic
-    def handle(self, *args, seed, **options):
+    def handle(self, *args, seed, if_empty, **options):
+        if if_empty and Service.objects.exists():
+            self.stdout.write("Database already has data; skipping seed.")
+            return
         rng = random.Random(seed)
         tz = business_tz()
 

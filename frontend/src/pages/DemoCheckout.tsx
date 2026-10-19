@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useDemoCheckout, useDemoCheckoutPay } from '../api/hooks'
 import type { DemoCheckoutSession } from '../api/types'
 import { Button, ErrorMessage, Loading } from '../components/ui'
+import { WakingUpNotice } from '../components/WakingUpNotice'
 import { formatPrice } from '../lib/dates'
 
 /**
@@ -15,6 +16,7 @@ export function DemoCheckout() {
 
   return (
     <div className="min-h-dvh bg-canvas">
+      <WakingUpNotice />
       <div className="bg-warn-soft px-4 py-2 text-center text-xs text-warn">
         <strong className="font-semibold">Demo checkout.</strong> This simulates a payment page. No card is needed and no
         money moves.

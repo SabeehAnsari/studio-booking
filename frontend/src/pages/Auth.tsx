@@ -93,6 +93,7 @@ export function Login() {
 
 export function Register() {
   const { user, register } = useAuth()
+  const { data: config } = useConfig()
   const navigate = useNavigate()
   const next = useNext()
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', phone: '', password: '' })
@@ -131,6 +132,12 @@ export function Register() {
       }
     >
       <form onSubmit={onSubmit} className="space-y-4">
+        {config?.demo_mode && (
+          <p className="rounded-lg border border-dashed border-line-strong px-3 py-2 text-xs text-ink-soft">
+            <strong className="font-medium text-ink">This is a public demo.</strong> A made-up email like{' '}
+            <span className="whitespace-nowrap text-ink">you@example.com</span> works fine. You don't need to use a real one.
+          </p>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="First name" error={fieldErrors.first_name?.[0]}>
             <input className={inputClass} autoComplete="given-name" required value={form.first_name} onChange={set('first_name')} />
