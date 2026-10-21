@@ -9,6 +9,7 @@ import { AdminDashboard } from './pages/AdminDashboard'
 import { Login, Register } from './pages/Auth'
 import { Book } from './pages/Book'
 import { DemoCheckout } from './pages/DemoCheckout'
+import { DemoEntry } from './pages/DemoEntry'
 import { Home } from './pages/Home'
 import { MyAppointments } from './pages/MyAppointments'
 import { BookingConfirmed, PaymentCancelled } from './pages/PaymentReturn'
@@ -62,6 +63,7 @@ export default function App() {
                     </RequireRole>
                   }
                 />
+                <Route path="demo/:role" element={<DemoEntry />} />
                 <Route path="login" element={<Login />} />
                 <Route path="register" element={<Register />} />
                 <Route

@@ -5,11 +5,14 @@ silently: time off that clashes with a booking is refused (with the clashes list
 hours report any upcoming bookings they leave outside, which stay booked.
 """
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -22,6 +25,15 @@ from .serializers import (
     WeeklyHoursSerializer,
     WorkingHoursSerializer,
 )
+
+
+# Public-demo guardrails: anyone can log in as the demo staff or owner, so stop one visitor
+# leaving the demo unbookable for the next until the nightly reset.
+DEMO_MAX_TIME_OFF = timedelta(days=7)
+
+
+def _demo_guardrails_apply(request) -> bool:
+    return settings.DEMO_MODE and request.user.is_demo
 
 
 def editable_staff(request, staff_id) -> StaffMember:
@@ -52,6 +64,11 @@ class WorkingHoursView(APIView):
         staff = editable_staff(request, staff_id)
         serializer = WeeklyHoursSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if _demo_guardrails_apply(request) and not serializer.validated_data["hours"]:
+            raise ValidationError(
+                {"detail": "In the public demo, keep at least one shift so other visitors can still book. "
+                           "The demo resets every night."}
+            )
         with transaction.atomic():
             staff.working_hours.all().delete()
             WorkingHours.objects.bulk_create(
@@ -103,6 +120,10 @@ class TimeOffListView(APIView):
         serializer = TimeOffSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         start, end = serializer.validated_data["start"], serializer.validated_data["end"]
+        if _demo_guardrails_apply(request) and end - start > DEMO_MAX_TIME_OFF:
+            raise ValidationError(
+                {"detail": "In the public demo, time off is limited to 7 days at a time. The demo resets every night."}
+            )
         with transaction.atomic():
             # Lock this staff member's bookings so none can slip in between the check and the insert.
             clashes = list(
