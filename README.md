@@ -21,6 +21,7 @@ An appointment booking system for service businesses (salons, clinics, studios).
 - **Swappable payment providers.** **Stripe Checkout** is used when `STRIPE_SECRET_KEY` is set. Otherwise a built-in **demo provider** runs the same flow end to end (hosted checkout page, a simulated declined card, refunds) with no account and no money moving. The live demo uses the demo provider.
 - **Email reminders 24 hours before.** A background worker (`manage.py send_reminders`) emails customers ahead of their visit: HTML and plain text, the local time, any deposit paid and the balance due. It's idempotent and safe to run in parallel (row locks with `SKIP LOCKED`), retries failures on the next pass, and skips last-minute bookings. Staff and owners see when each reminder went out.
 - **Rescheduling.** Customers move a booking up to the cancellation cutoff (staff and owners until it starts), optionally to another staff member. The booking's own slot counts as free while moving it, so it can shift by 15 minutes; the deposit carries over and a fresh reminder is sent for the new time.
+- **Staff self-service for hours and time off.** Staff edit their own weekly shifts (several per day for breaks) and book time off in studio time; owners can edit anyone's. Saving checks for overlapping shifts. New hours list any upcoming bookings they leave outside (which stay booked), and time off that clashes with bookings is refused with the clashes listed and linked for rescheduling. Changes affect availability immediately.
 - **"Any available" staff.** Customers can pick a person or take the first free one.
 - **Shareable booking state.** The service, staff, day and slot live in the URL, so the selection survives the login redirect.
 - **Django admin** for managing services, staff, working hours and time off.
@@ -74,6 +75,8 @@ React SPA ──/api──▶ Django REST API ──▶ PostgreSQL
 | `POST` | `/api/appointments/{id}/pay/` | customer: reopen checkout for an unpaid hold |
 | `GET` | `/api/payments/checkout/{session_id}/` | customer: confirm payment on return from checkout |
 | `POST` | `/api/payments/stripe/webhook/` | Stripe (signature-verified) |
+| `GET/PUT` | `/api/staff/{id}/hours/` | that staff member, admin |
+| `GET/POST` | `/api/staff/{id}/time-off/` · `DELETE …/time-off/{id}/` | that staff member, admin |
 | `GET` | `/api/dashboard/` | admin |
 
 ## Running locally
@@ -137,4 +140,4 @@ Pushing to `main` deploys both services. Configuration lives in environment vari
 - [x] Online deposits (Stripe or demo provider), with automatic refunds
 - [x] Email reminders 24 hours before (background worker)
 - [x] Customer rescheduling
-- [ ] Staff self-service for working hours and time off
+- [x] Staff self-service for working hours and time off

@@ -136,3 +136,19 @@ export interface DemoCheckoutSession {
   expires_at: string
   cancel_url: string
 }
+
+export interface TimeOff {
+  id: number
+  start: string
+  end: string
+  reason: string
+}
+
+/** A booking affected by a schedule change. */
+export interface AppointmentBrief {
+  id: number
+  start: string
+  end: string
+  service: string
+  customer: string
+}

@@ -6,8 +6,8 @@ from rest_framework.exceptions import APIException
 from accounts.serializers import UserSerializer
 from payments.services import deposit_required, hold_duration, release_expired_holds
 
-from .availability import is_slot_available, next_available_slot
-from .models import Appointment, Service, StaffMember, WorkingHours
+from .availability import business_tz, is_slot_available, next_available_slot
+from .models import Appointment, Service, StaffMember, TimeOff, WorkingHours
 
 
 class SlotUnavailable(APIException):
@@ -148,4 +148,56 @@ class RescheduleSerializer(serializers.Serializer):
                 raise SlotUnavailable("That time was just booked. Please pick another slot.") from exc
             raise
         return appointment
+
+
+class WeeklyHoursSerializer(serializers.Serializer):
+    """A staff member's whole week, replaced in one go: [{weekday, start_time, end_time}, ...]."""
+
+    hours = WorkingHoursSerializer(many=True)
+
+    def validate_hours(self, shifts):
+        by_day: dict[int, list] = {}
+        for shift in shifts:
+            if shift["end_time"] <= shift["start_time"]:
+                day = WorkingHours.Weekday(shift["weekday"]).label
+                raise serializers.ValidationError(f"{day}: a shift must end after it starts.")
+            by_day.setdefault(shift["weekday"], []).append(shift)
+        for weekday, day_shifts in by_day.items():
+            day_shifts.sort(key=lambda s: s["start_time"])
+            for earlier, later in zip(day_shifts, day_shifts[1:]):
+                if later["start_time"] < earlier["end_time"]:
+                    day = WorkingHours.Weekday(weekday).label
+                    raise serializers.ValidationError(f"{day}: shifts overlap.")
+        return shifts
+
+
+class TimeOffSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TimeOff
+        fields = ["id", "start", "end", "reason"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Staff type times in studio time ("2026-10-30T09:00"), not UTC.
+        # (DRF reads the field's `timezone` attribute; `default_timezone` is a method.)
+        for name in ("start", "end"):
+            self.fields[name].timezone = business_tz()
+
+    def validate(self, attrs):
+        if attrs["end"] <= attrs["start"]:
+            raise serializers.ValidationError({"end": "Time off must end after it starts."})
+        if attrs["end"] <= timezone.now():
+            raise serializers.ValidationError({"end": "That time is already in the past."})
+        return attrs
+
+
+class AppointmentBriefSerializer(serializers.ModelSerializer):
+    """Just enough to list bookings affected by a schedule change."""
+
+    service = serializers.CharField(source="service.name")
+    customer = serializers.CharField(source="customer.get_full_name")
+
+    class Meta:
+        model = Appointment
+        fields = ["id", "start", "end", "service", "customer"]
 

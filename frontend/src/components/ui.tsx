@@ -120,3 +120,7 @@ export const inputClass =
 
 export const selectClass =
   'h-10 rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink focus:border-brand focus:outline-none'
+
+/** Inputs that size themselves (time pickers); `inputClass` is full width. */
+export const compactInputClass =
+  'h-10 rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink focus:border-brand focus:outline-none'

@@ -13,6 +13,7 @@ import { Home } from './pages/Home'
 import { MyAppointments } from './pages/MyAppointments'
 import { BookingConfirmed, PaymentCancelled } from './pages/PaymentReturn'
 import { Reschedule } from './pages/Reschedule'
+import { StaffAvailability } from './pages/StaffAvailability'
 import { StaffSchedule } from './pages/StaffSchedule'
 
 const queryClient = new QueryClient({
@@ -84,6 +85,14 @@ export default function App() {
                   element={
                     <RequireRole roles={['staff']}>
                       <StaffSchedule />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="availability"
+                  element={
+                    <RequireRole roles={['staff', 'admin']}>
+                      <StaffAvailability />
                     </RequireRole>
                   }
                 />
