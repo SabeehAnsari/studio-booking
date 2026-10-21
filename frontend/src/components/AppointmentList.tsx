@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAppointmentAction, usePayAppointment, type AppointmentAction } from '../api/hooks'
 import type { AppConfig, Appointment, Role } from '../api/types'
 import { formatDateTime, formatDuration, formatPrice, formatTime } from '../lib/dates'
@@ -6,10 +7,11 @@ import { useToast } from '../lib/toast'
 import { ConfirmDialog } from './ConfirmDialog'
 import { Button, ErrorMessage, StatusBadge } from './ui'
 
-type RowAction = AppointmentAction | 'pay'
+type RowAction = AppointmentAction | 'pay' | 'reschedule'
 
 const actionLabels: Record<RowAction, string> = {
   pay: 'Pay deposit',
+  reschedule: 'Reschedule',
   confirm: 'Confirm',
   complete: 'Mark done',
   'no-show': 'No-show',
@@ -33,12 +35,12 @@ function actionsFor(appointment: Appointment, role: Role, config: AppConfig): Ro
   const started = new Date(appointment.start) <= new Date()
   if (role === 'customer') {
     const cutoff = new Date(appointment.start).getTime() - config.cancellation_cutoff_hours * 3_600_000
-    return Date.now() < cutoff ? ['cancel'] : []
+    return Date.now() < cutoff ? ['reschedule', 'cancel'] : []
   }
   const actions: RowAction[] = []
   if (appointment.status === 'pending') actions.push('confirm')
   if (started) actions.push('complete', 'no-show')
-  else actions.push('cancel')
+  else actions.push('reschedule', 'cancel')
   return actions
 }
 
@@ -89,6 +91,7 @@ function AppointmentRow({
   const mutation = useAppointmentAction()
   const pay = usePayAppointment()
   const toast = useToast()
+  const navigate = useNavigate()
   const [pendingAction, setPendingAction] = useState<AppointmentAction | null>(null)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const actions = actionsFor(a, role, config)
@@ -112,6 +115,7 @@ function AppointmentRow({
 
   function run(action: RowAction) {
     if (action === 'pay') pay.mutate(a.id)
+    else if (action === 'reschedule') navigate(`/appointments/${a.id}/reschedule`)
     else if (action === 'cancel') {
       mutation.reset()
       setConfirmingCancel(true)

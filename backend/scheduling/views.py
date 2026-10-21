@@ -15,7 +15,7 @@ from payments import services as payments
 from .availability import bookable_staff, business_tz, compute_slots, local_day_bounds
 from .models import Appointment, Service, StaffMember
 from .permissions import IsBusinessAdmin, can_manage
-from .serializers import AppointmentSerializer, ServiceMenuSerializer, StaffMemberSerializer
+from .serializers import AppointmentSerializer, RescheduleSerializer, ServiceMenuSerializer, StaffMemberSerializer
 
 
 @api_view(["GET"])
@@ -104,7 +104,7 @@ class AvailabilityView(APIView):
 
         staff_id = params.get("staff")
         staff = bookable_staff(service, int(staff_id) if staff_id else None)
-        by_day = compute_slots(service, staff, first, last)
+        by_day = compute_slots(service, staff, first, last, exclude_appointment_id=self._excluded(request))
 
         days = []
         for day, slots in by_day.items():
@@ -115,6 +115,18 @@ class AvailabilityView(APIView):
             days.append({"date": day, "slots": list(grouped.values())})
 
         return Response({"service": service.id, "timezone": settings.BUSINESS_TIMEZONE, "days": days})
+
+    @staticmethod
+    def _excluded(request) -> int | None:
+        """`?exclude=<id>` shows the times a booking could move to. Only honoured for a booking
+        the viewer may reschedule, so it can't be used to peek at other people's appointments."""
+        appointment_id = request.query_params.get("exclude")
+        if not appointment_id or not request.user.is_authenticated:
+            return None
+        appointment = Appointment.objects.filter(pk=appointment_id).select_related("staff").first()
+        if appointment and (appointment.customer_id == request.user.id or can_manage(request.user, appointment)):
+            return appointment.pk
+        return None
 
 
 class AppointmentViewSet(
@@ -182,6 +194,25 @@ class AppointmentViewSet(
         except payments.PaymentError as exc:
             raise ValidationError({"detail": str(exc)})
         return Response({"checkout_url": payment.checkout_url})
+
+    @action(detail=True, methods=["post"])
+    def reschedule(self, request, pk=None):
+        appointment = self.get_object()
+        if appointment.status not in (Appointment.Status.PENDING, Appointment.Status.CONFIRMED):
+            raise ValidationError({"detail": "Only upcoming, confirmed appointments can be rescheduled."})
+        if appointment.start <= timezone.now():
+            raise ValidationError({"detail": "This appointment has already started."})
+        if not can_manage(request.user, appointment):
+            cutoff = appointment.start - timedelta(hours=settings.CANCELLATION_CUTOFF_HOURS)
+            if timezone.now() > cutoff:
+                raise ValidationError(
+                    {"detail": f"Appointments can't be moved within {settings.CANCELLATION_CUTOFF_HOURS} hours "
+                               "of the start time. Please contact us directly."}
+                )
+        serializer = RescheduleSerializer(data=request.data, context={"appointment": appointment})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(self.get_serializer(self.get_queryset().get(pk=appointment.pk)).data)
 
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):

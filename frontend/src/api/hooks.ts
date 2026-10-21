@@ -28,9 +28,10 @@ export function useStaff(serviceId?: number) {
   })
 }
 
-export function useAvailability(params: { service?: number; staff?: number; from: string; to: string }) {
+export function useAvailability(params: { service?: number; staff?: number; from: string; to: string; exclude?: number }) {
   const query = new URLSearchParams({ service: String(params.service), from: params.from, to: params.to })
   if (params.staff) query.set('staff', String(params.staff))
+  if (params.exclude) query.set('exclude', String(params.exclude))
   return useQuery({
     queryKey: ['availability', params],
     queryFn: () => api<AvailabilityResponse>(`/availability/?${query}`),
@@ -127,5 +128,21 @@ export function useDemoCheckoutPay(sessionId: string) {
   return useMutation({
     mutationFn: (outcome: 'success' | 'decline') =>
       api<{ redirect_url: string }>(`/payments/demo-checkout/${sessionId}/pay/`, { method: 'POST', json: { outcome } }),
+  })
+}
+
+export function useRescheduleAppointment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, start, staffId }: { id: number; start: string; staffId?: number }) =>
+      api<Appointment>(`/appointments/${id}/reschedule/`, {
+        method: 'POST',
+        json: { start, ...(staffId ? { staff_id: staffId } : {}) },
+      }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['appointments'] })
+      qc.invalidateQueries({ queryKey: ['availability'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    },
   })
 }

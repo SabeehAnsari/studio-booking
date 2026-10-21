@@ -110,3 +110,42 @@ class AppointmentSerializer(serializers.ModelSerializer):
             if "no_overlapping_appointments_per_staff" in str(exc):
                 raise SlotUnavailable("That time was just booked. Please pick another slot.") from exc
             raise
+
+
+class RescheduleSerializer(serializers.Serializer):
+    """Move an existing booking to a new time and, optionally, a different staff member."""
+
+    start = serializers.DateTimeField()
+    staff_id = serializers.PrimaryKeyRelatedField(
+        source="staff", queryset=StaffMember.objects.filter(is_active=True), required=False
+    )
+
+    def validate(self, attrs):
+        appointment = self.context["appointment"]
+        staff = attrs.get("staff", appointment.staff)
+        if not staff.services.filter(pk=appointment.service_id).exists():
+            raise serializers.ValidationError({"staff_id": f"{staff} does not offer {appointment.service}."})
+        if attrs["start"] == appointment.start and staff == appointment.staff:
+            raise serializers.ValidationError({"start": "That's the time it's already booked for."})
+        attrs["staff"] = staff
+        return attrs
+
+    def save(self):
+        appointment = self.context["appointment"]
+        staff, start = self.validated_data["staff"], self.validated_data["start"]
+        if not is_slot_available(appointment.service, staff, start, exclude_appointment_id=appointment.pk):
+            raise SlotUnavailable("That time is no longer available. Please pick another slot.")
+        appointment.staff = staff
+        appointment.start = start
+        appointment.end = start + appointment.service.duration
+        # The reminder was for the old time; the worker sends a fresh one for the new time.
+        appointment.reminder_sent_at = None
+        try:
+            with transaction.atomic():
+                appointment.save(update_fields=["staff", "start", "end", "reminder_sent_at", "updated_at"])
+        except IntegrityError as exc:
+            if "no_overlapping_appointments_per_staff" in str(exc):
+                raise SlotUnavailable("That time was just booked. Please pick another slot.") from exc
+            raise
+        return appointment
+
