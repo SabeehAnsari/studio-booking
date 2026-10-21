@@ -3,6 +3,7 @@ import { api } from './client'
 import type {
   AppConfig,
   Appointment,
+  AppointmentBrief,
   AvailabilityResponse,
   Dashboard,
   DemoCheckoutSession,
@@ -10,6 +11,8 @@ import type {
   PaymentSummary,
   Service,
   StaffMember,
+  TimeOff,
+  WorkingHours,
 } from './types'
 
 export function useConfig() {
@@ -144,5 +147,64 @@ export function useRescheduleAppointment() {
       qc.invalidateQueries({ queryKey: ['availability'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
     },
+  })
+}
+
+export function useMyStaffProfile(enabled: boolean) {
+  return useQuery({ queryKey: ['staff', 'me'], queryFn: () => api<StaffMember>('/staff/me/'), enabled })
+}
+
+/** Everything that depends on a staff member's schedule: refresh after hours or time off change. */
+function invalidateSchedule(qc: ReturnType<typeof useQueryClient>, staffId: number) {
+  qc.invalidateQueries({ queryKey: ['staff-hours', staffId] })
+  qc.invalidateQueries({ queryKey: ['time-off', staffId] })
+  qc.invalidateQueries({ queryKey: ['staff'] })
+  qc.invalidateQueries({ queryKey: ['services'] })
+  qc.invalidateQueries({ queryKey: ['availability'] })
+}
+
+export function useStaffHours(staffId: number | undefined) {
+  return useQuery({
+    queryKey: ['staff-hours', staffId],
+    queryFn: () => api<{ hours: WorkingHours[] }>(`/staff/${staffId}/hours/`),
+    enabled: staffId !== undefined,
+  })
+}
+
+export function useSaveStaffHours(staffId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (hours: WorkingHours[]) =>
+      api<{ hours: WorkingHours[]; outside_hours: AppointmentBrief[] }>(`/staff/${staffId}/hours/`, {
+        method: 'PUT',
+        json: { hours },
+      }),
+    onSuccess: () => invalidateSchedule(qc, staffId),
+  })
+}
+
+export function useTimeOff(staffId: number | undefined) {
+  return useQuery({
+    queryKey: ['time-off', staffId],
+    queryFn: () => api<TimeOff[]>(`/staff/${staffId}/time-off/`),
+    enabled: staffId !== undefined,
+  })
+}
+
+export function useAddTimeOff(staffId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    /** `start`/`end` are studio-time strings like "2026-10-30T09:00". */
+    mutationFn: (body: { start: string; end: string; reason: string }) =>
+      api<TimeOff>(`/staff/${staffId}/time-off/`, { method: 'POST', json: body }),
+    onSuccess: () => invalidateSchedule(qc, staffId),
+  })
+}
+
+export function useDeleteTimeOff(staffId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api<null>(`/staff/${staffId}/time-off/${id}/`, { method: 'DELETE' }),
+    onSuccess: () => invalidateSchedule(qc, staffId),
   })
 }

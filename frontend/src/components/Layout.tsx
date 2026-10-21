@@ -38,14 +38,24 @@ export function Layout() {
               </NavLink>
             )}
             {user?.role === 'staff' && (
-              <NavLink to="/schedule" className={navClass}>
-                My schedule
-              </NavLink>
+              <>
+                <NavLink to="/schedule" className={navClass}>
+                  My schedule
+                </NavLink>
+                <NavLink to="/availability" className={navClass}>
+                  Availability
+                </NavLink>
+              </>
             )}
             {user?.role === 'admin' && (
-              <NavLink to="/admin" className={navClass}>
-                Dashboard
-              </NavLink>
+              <>
+                <NavLink to="/admin" className={navClass}>
+                  Dashboard
+                </NavLink>
+                <NavLink to="/availability" className={navClass}>
+                  Staff hours
+                </NavLink>
+              </>
             )}
             {user ? (
               <Button
