@@ -23,7 +23,7 @@ from .serializers import AppointmentSerializer, ServiceMenuSerializer, StaffMemb
 def config_view(request):
     return Response(
         {
-            "business_name": "Studio Booking",
+            "business_name": settings.BUSINESS_NAME,
             "timezone": settings.BUSINESS_TIMEZONE,
             "slot_interval_minutes": settings.SLOT_INTERVAL_MINUTES,
             "min_notice_minutes": settings.MIN_BOOKING_NOTICE_MINUTES,

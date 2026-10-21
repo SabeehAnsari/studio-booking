@@ -72,9 +72,10 @@ class AppointmentSerializer(serializers.ModelSerializer):
         model = Appointment
         fields = [
             "id", "service", "staff", "customer", "service_id", "staff_id",
-            "start", "end", "status", "price", "notes", "hold_expires_at", "payment", "cancelled_at", "created_at",
+            "start", "end", "status", "price", "notes", "hold_expires_at", "payment", "reminder_sent_at", "cancelled_at",
+            "created_at",
         ]
-        read_only_fields = ["end", "status", "price", "hold_expires_at", "cancelled_at", "created_at"]
+        read_only_fields = ["end", "status", "price", "hold_expires_at", "reminder_sent_at", "cancelled_at", "created_at"]
 
     def get_payment(self, appointment):
         """The most recent deposit payment, if any. Uses the prefetched `payments` when available."""

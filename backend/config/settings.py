@@ -110,11 +110,32 @@ USE_TZ = True
 # everything is stored in UTC.
 BUSINESS_TIMEZONE = os.environ.get("BUSINESS_TIMEZONE", "America/New_York")
 
+BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Studio Booking")
+
 # Booking rules
 SLOT_INTERVAL_MINUTES = 15
 MIN_BOOKING_NOTICE_MINUTES = 60
 MAX_BOOKING_DAYS_AHEAD = 60
 CANCELLATION_CUTOFF_HOURS = 2
+
+# Appointment reminders (sent by `manage.py send_reminders`).
+REMINDER_HOURS_BEFORE = 24
+# Bookings made this close to the start don't get a reminder: the customer only just booked.
+REMINDER_MIN_BOOKING_LEAD_HOURS = 3
+
+# Email. With no EMAIL_HOST, messages are written to the log instead of sent (console
+# backend), which is how the public demo runs. Set the SMTP variables to send for real.
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND") or (
+    "django.core.mail.backends.smtp.EmailBackend" if EMAIL_HOST else "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_TIMEOUT = 20
+# `or` rather than a default: CI passes unset secrets as empty strings.
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL") or f"{BUSINESS_NAME} <bookings@localhost>"
 
 # Enables one-click demo logins. Turn off for a real client deployment.
 DEMO_MODE = env_bool("DEMO_MODE")

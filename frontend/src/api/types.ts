@@ -100,6 +100,7 @@ export interface Appointment {
   price: string
   notes: string
   hold_expires_at: string | null
+  reminder_sent_at: string | null
   payment: PaymentSummary | null
   cancelled_at: string | null
   created_at: string

@@ -140,6 +140,8 @@ class Appointment(models.Model):
     notes = models.TextField(blank=True)
     # While awaiting payment, the slot is held until this moment, then released.
     hold_expires_at = models.DateTimeField(null=True, blank=True)
+    # Set once the 24-hour reminder has gone out (or been suppressed for a demo account).
+    reminder_sent_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

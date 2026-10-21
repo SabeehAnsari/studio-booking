@@ -19,6 +19,7 @@ An appointment booking system for service businesses (salons, clinics, studios).
   - *Owner:* KPIs, a 14-day booking chart, top services, staff load, and every appointment with filters
 - **Deposits paid online.** Each service can require a deposit. Booking holds the slot (`awaiting_payment`) and sends the customer to a hosted checkout. Payment confirms the booking; an abandoned checkout frees the slot after 35 minutes. Cancelling a paid booking refunds the deposit automatically, while no-shows keep it.
 - **Swappable payment providers.** **Stripe Checkout** is used when `STRIPE_SECRET_KEY` is set. Otherwise a built-in **demo provider** runs the same flow end to end (hosted checkout page, a simulated declined card, refunds) with no account and no money moving. The live demo uses the demo provider.
+- **Email reminders 24 hours before.** A background worker (`manage.py send_reminders`) emails customers ahead of their visit: HTML and plain text, the local time, any deposit paid and the balance due. It's idempotent and safe to run in parallel (row locks with `SKIP LOCKED`), retries failures on the next pass, and skips last-minute bookings. Staff and owners see when each reminder went out.
 - **"Any available" staff.** Customers can pick a person or take the first free one.
 - **Shareable booking state.** The service, staff, day and slot live in the URL, so the selection survives the login redirect.
 - **Django admin** for managing services, staff, working hours and time off.
@@ -109,6 +110,10 @@ npm run dev
 
 For Stripe webhooks in development: `stripe listen --forward-to localhost:8000/api/payments/stripe/webhook/`.
 
+### Email
+
+Without SMTP settings, emails are written to the log (Django's console backend), which is how the demo runs. To send real email, set `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` and `DEFAULT_FROM_EMAIL`. Demo accounts are never emailed. Run the worker locally with `python manage.py send_reminders --loop`.
+
 Run the tests with `python manage.py test` (backend) and `npm run lint && npm run build` (frontend).
 
 `seed_demo` wipes and recreates all demo data, with stable IDs. Schedule it nightly on a public demo so visitors always start from a clean state.
@@ -121,12 +126,13 @@ Run the tests with `python manage.py test` (backend) and `npm run lint && npm ru
 | API | Render web service (Ohio) | `render.yaml` → `studio-booking-api`, `backend/build.sh` then Gunicorn |
 | Database | Neon Postgres (Ohio) | App traffic over the pooled connection; migrations over the direct one |
 | Demo reset | GitHub Actions | `.github/workflows/reset-demo.yml`, nightly at 3 AM studio time |
+| Reminder worker | GitHub Actions | `.github/workflows/send-reminders.yml` runs `send_reminders` every 30 minutes. On a host with always-on workers, run `send_reminders --loop` instead |
 
 Pushing to `main` deploys both services. Configuration lives in environment variables: the frontend needs `VITE_API_URL`; the API needs `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `CORS_ALLOWED_ORIGINS` and `FRONTEND_URL` (see `render.yaml`).
 
 ## Roadmap
 
 - [x] Online deposits (Stripe or demo provider), with automatic refunds
-- [ ] Email reminders 24 hours before (background worker)
+- [x] Email reminders 24 hours before (background worker)
 - [ ] Customer rescheduling
 - [ ] Staff self-service for working hours and time off
