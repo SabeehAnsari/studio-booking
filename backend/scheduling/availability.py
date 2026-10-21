@@ -43,12 +43,15 @@ def booking_window() -> tuple[datetime, datetime]:
     )
 
 
-def _busy_intervals(staff_ids, range_start, range_end) -> dict[int, list[tuple[datetime, datetime]]]:
+def _busy_intervals(
+    staff_ids, range_start, range_end, exclude_appointment_id: int | None = None
+) -> dict[int, list[tuple[datetime, datetime]]]:
     busy: dict[int, list[tuple[datetime, datetime]]] = defaultdict(list)
     appointments = (
         Appointment.objects.active()
         .filter(staff_id__in=staff_ids)
         .overlapping(range_start, range_end)
+        .exclude(pk=exclude_appointment_id)
         .values_list("staff_id", "start", "end")
     )
     time_off = (
@@ -64,8 +67,14 @@ def _overlaps_any(start, end, intervals) -> bool:
     return any(start < busy_end and end > busy_start for busy_start, busy_end in intervals)
 
 
-def compute_slots(service: Service, staff_members, first_day: date, last_day: date) -> dict[date, list[Slot]]:
-    """Return available slots per local day (inclusive range) for the given staff members."""
+def compute_slots(
+    service: Service, staff_members, first_day: date, last_day: date, *, exclude_appointment_id: int | None = None
+) -> dict[date, list[Slot]]:
+    """Return available slots per local day (inclusive range) for the given staff members.
+
+    `exclude_appointment_id` ignores one booking, so rescheduling can move it into time it
+    currently occupies itself (e.g. 15 minutes later).
+    """
     staff_members = list(staff_members)
     if not staff_members or last_day < first_day:
         return {}
@@ -78,7 +87,7 @@ def compute_slots(service: Service, staff_members, first_day: date, last_day: da
     range_start, _ = local_day_bounds(first_day)
     _, range_end = local_day_bounds(last_day)
     staff_ids = [s.id for s in staff_members]
-    busy = _busy_intervals(staff_ids, range_start, range_end)
+    busy = _busy_intervals(staff_ids, range_start, range_end, exclude_appointment_id)
 
     hours_by_staff: dict[int, dict[int, list]] = defaultdict(lambda: defaultdict(list))
     for staff in staff_members:
@@ -119,8 +128,12 @@ def next_available_slot(service: Service, search_days: int = 14) -> Slot | None:
     return next((slots[0] for _, slots in sorted(by_day.items()) if slots), None)
 
 
-def is_slot_available(service: Service, staff: StaffMember, start: datetime) -> bool:
+def is_slot_available(
+    service: Service, staff: StaffMember, start: datetime, *, exclude_appointment_id: int | None = None
+) -> bool:
     start = start.astimezone(UTC)
     day = start.astimezone(business_tz()).date()
-    slots = compute_slots(service, bookable_staff(service, staff.id), day, day).get(day, [])
+    slots = compute_slots(
+        service, bookable_staff(service, staff.id), day, day, exclude_appointment_id=exclude_appointment_id
+    ).get(day, [])
     return any(slot.start == start for slot in slots)

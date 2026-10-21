@@ -12,6 +12,7 @@ import { DemoCheckout } from './pages/DemoCheckout'
 import { Home } from './pages/Home'
 import { MyAppointments } from './pages/MyAppointments'
 import { BookingConfirmed, PaymentCancelled } from './pages/PaymentReturn'
+import { Reschedule } from './pages/Reschedule'
 import { StaffSchedule } from './pages/StaffSchedule'
 
 const queryClient = new QueryClient({
@@ -67,6 +68,14 @@ export default function App() {
                   element={
                     <RequireRole roles={['customer']}>
                       <MyAppointments />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="appointments/:id/reschedule"
+                  element={
+                    <RequireRole roles={['customer', 'staff', 'admin']}>
+                      <Reschedule />
                     </RequireRole>
                   }
                 />
