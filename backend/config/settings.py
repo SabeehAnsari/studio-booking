@@ -11,16 +11,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def env(name: str, default: str = "") -> str:
+    """An environment variable, treating "set but empty" (e.g. `EMAIL_PORT=` copied from
+    .env.example, or an unset CI secret) the same as unset."""
+    return os.environ.get(name) or default
+
+
 def env_bool(name: str, default: bool = False) -> bool:
-    return os.environ.get(name, str(default)).lower() in {"1", "true", "yes", "on"}
+    return env(name, str(default)).lower() in {"1", "true", "yes", "on"}
 
 
 def env_list(name: str, default: str = "") -> list[str]:
-    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+    return [item.strip() for item in env(name, default).split(",") if item.strip()]
 
 
 DEBUG = env_bool("DEBUG")
-SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key" if DEBUG else "")
+SECRET_KEY = env("SECRET_KEY", "insecure-dev-key" if DEBUG else "")
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY must be set when DEBUG is off")
 
@@ -108,9 +114,9 @@ USE_TZ = True
 
 # The timezone the business operates in. Working hours are interpreted in this zone;
 # everything is stored in UTC.
-BUSINESS_TIMEZONE = os.environ.get("BUSINESS_TIMEZONE", "America/New_York")
+BUSINESS_TIMEZONE = env("BUSINESS_TIMEZONE", "America/New_York")
 
-BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Studio Booking")
+BUSINESS_NAME = env("BUSINESS_NAME", "Studio Booking")
 
 # Booking rules
 SLOT_INTERVAL_MINUTES = 15
@@ -125,26 +131,25 @@ REMINDER_MIN_BOOKING_LEAD_HOURS = 3
 
 # Email. With no EMAIL_HOST, messages are written to the log instead of sent (console
 # backend), which is how the public demo runs. Set the SMTP variables to send for real.
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
-EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND") or (
+EMAIL_HOST = env("EMAIL_HOST")
+EMAIL_BACKEND = env("EMAIL_BACKEND") or (
     "django.core.mail.backends.smtp.EmailBackend" if EMAIL_HOST else "django.core.mail.backends.console.EmailBackend"
 )
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_PORT = int(env("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = env("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 EMAIL_TIMEOUT = 20
-# `or` rather than a default: CI passes unset secrets as empty strings.
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL") or f"{BUSINESS_NAME} <bookings@localhost>"
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", f"{BUSINESS_NAME} <bookings@localhost>")
 
 # Enables one-click demo logins. Turn off for a real client deployment.
 DEMO_MODE = env_bool("DEMO_MODE")
 
 # Payments. Provider is "stripe", "demo" (simulated checkout, no money moves) or "none".
 # Defaults: Stripe if a key is set, otherwise the demo provider in demo mode, otherwise off.
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-PAYMENT_PROVIDER = os.environ.get("PAYMENT_PROVIDER") or (
+STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET")
+PAYMENT_PROVIDER = env("PAYMENT_PROVIDER") or (
     "stripe" if STRIPE_SECRET_KEY else "demo" if DEMO_MODE else "none"
 )
 if PAYMENT_PROVIDER not in {"stripe", "demo", "none"}:
@@ -152,13 +157,13 @@ if PAYMENT_PROVIDER not in {"stripe", "demo", "none"}:
 if PAYMENT_PROVIDER == "stripe" and not STRIPE_SECRET_KEY:
     raise RuntimeError("PAYMENT_PROVIDER=stripe needs STRIPE_SECRET_KEY")
 PAYMENTS_ENABLED = PAYMENT_PROVIDER != "none"
-PAYMENT_CURRENCY = os.environ.get("PAYMENT_CURRENCY", "usd")
+PAYMENT_CURRENCY = env("PAYMENT_CURRENCY", "usd")
 # Stripe Checkout sessions must live at least 30 minutes. The slot hold outlives the
 # session by a grace period, so a payment completed at the last second still finds its slot.
 CHECKOUT_SESSION_MINUTES = 30
 PAYMENT_HOLD_GRACE_MINUTES = 5
 # Where Stripe sends the customer back to after checkout.
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+FRONTEND_URL = env("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
