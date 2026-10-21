@@ -1,0 +1,50 @@
+name: Send appointment reminders
+
+# Runs the reminder worker against the live database every 30 minutes. Free hosting has no
+# always-on background workers; on a host that has them, run `send_reminders --loop` instead.
+# Reminders go out whenever an appointment is under 24 hours away, so a run that's late by a
+# few minutes (GitHub's schedules are best-effort) doesn't matter.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: send-reminders
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DEBUG: "False"
+      SECRET_KEY: only-used-to-run-a-management-command-not-a-server
+      DATABASE_URL: ${{ secrets.DEMO_DATABASE_URL }}
+      FRONTEND_URL: https://studio-booking-web.onrender.com
+      # Optional SMTP settings; without EMAIL_HOST, emails are written to this job's log.
+      EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+      EMAIL_HOST_USER: ${{ secrets.EMAIL_HOST_USER }}
+      EMAIL_HOST_PASSWORD: ${{ secrets.EMAIL_HOST_PASSWORD }}
+      DEFAULT_FROM_EMAIL: ${{ secrets.DEFAULT_FROM_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Check the database secret is set
+        id: secret
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::notice::DEMO_DATABASE_URL secret not set; no reminders to send."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.secret.outputs.present == 'true'
+        run: pip install -r requirements.txt
+      - if: steps.secret.outputs.present == 'true'
+        run: python manage.py send_reminders

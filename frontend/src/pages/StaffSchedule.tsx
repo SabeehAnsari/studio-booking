@@ -48,10 +48,15 @@ function Schedule({ config }: { config: AppConfig }) {
         }
       />
 
-      {appointments.data && (
+      {appointments.data && active.length > 0 && (
         <p className="mb-4 text-sm text-ink-soft">
-          <strong className="text-ink">{active.length}</strong> appointment{active.length === 1 ? '' : 's'} ·{' '}
-          <strong className="text-ink">{formatPrice(revenue)}</strong> booked
+          <strong className="text-ink">{active.length}</strong> appointment{active.length === 1 ? '' : 's'}
+          {revenue > 0 && (
+            <>
+              {' · '}
+              <strong className="text-ink">{formatPrice(revenue)}</strong> booked
+            </>
+          )}
         </p>
       )}
 

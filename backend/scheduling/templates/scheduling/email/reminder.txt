@@ -1,0 +1,17 @@
+{% autoescape off %}Hi {{ first_name }},
+
+A quick reminder: you're booked in {{ day }}.
+
+  {{ service }} with {{ staff }}
+  {{ date }} at {{ time }} ({{ tz_name }})
+  {{ duration }} minutes
+{% if deposit %}
+  Deposit paid: ${{ deposit|floatformat:"-2" }}
+  Due at the studio: ${{ balance|floatformat:"-2" }}
+{% endif %}
+Need to change plans? You can cancel or reschedule up to {{ cutoff_hours }} hours before:
+{{ manage_url }}
+
+See you soon,
+{{ business_name }}
+{% endautoescape %}

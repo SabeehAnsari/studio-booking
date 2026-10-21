@@ -137,6 +137,11 @@ function AppointmentRow({
           {role === 'admin' && <span className="text-ink-muted"> · with {a.staff.name}</span>}
         </p>
         {a.notes && role !== 'customer' && <p className="mt-1 text-sm text-ink-muted italic">“{a.notes}”</p>}
+        {a.reminder_sent_at && role !== 'customer' && (a.status === 'confirmed' || a.status === 'pending') && (
+          <p className="mt-1 text-xs text-ink-muted">
+            <span aria-hidden="true">✉ </span>Reminder sent {formatDateTime(a.reminder_sent_at, tz)}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-3">
         <div className="text-right">
