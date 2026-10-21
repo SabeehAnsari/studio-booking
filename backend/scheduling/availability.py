@@ -79,9 +79,6 @@ def compute_slots(
     if not staff_members or last_day < first_day:
         return {}
 
-    tz = business_tz()
-    step = timedelta(minutes=settings.SLOT_INTERVAL_MINUTES)
-    duration = service.duration
     earliest, latest = booking_window()
 
     range_start, _ = local_day_bounds(first_day)
@@ -89,29 +86,42 @@ def compute_slots(
     staff_ids = [s.id for s in staff_members]
     busy = _busy_intervals(staff_ids, range_start, range_end, exclude_appointment_id)
 
-    hours_by_staff: dict[int, dict[int, list]] = defaultdict(lambda: defaultdict(list))
-    for staff in staff_members:
-        for shift in staff.working_hours.all():
-            hours_by_staff[staff.id][shift.weekday].append(shift)
+    hours = _hours_by_staff(staff_members)
 
     result: dict[date, list[Slot]] = {}
     day = first_day
     while day <= last_day:
-        slots: list[Slot] = []
-        for staff in staff_members:
-            for shift in hours_by_staff[staff.id][day.weekday()]:
-                shift_start = datetime.combine(day, shift.start_time, tzinfo=tz).astimezone(UTC)
-                shift_end = datetime.combine(day, shift.end_time, tzinfo=tz).astimezone(UTC)
-                cursor = shift_start
-                while cursor + duration <= shift_end:
-                    slot_end = cursor + duration
-                    if earliest <= cursor <= latest and not _overlaps_any(cursor, slot_end, busy[staff.id]):
-                        slots.append(Slot(cursor, slot_end, staff.id))
-                    cursor += step
-        slots.sort(key=lambda s: (s.start, s.staff_id))
-        result[day] = slots
+        result[day] = _day_slots(service, staff_members, day, hours, busy, earliest, latest)
         day += timedelta(days=1)
     return result
+
+
+def _hours_by_staff(staff_members) -> dict[int, dict[int, list]]:
+    hours: dict[int, dict[int, list]] = defaultdict(lambda: defaultdict(list))
+    for staff in staff_members:
+        for shift in staff.working_hours.all():
+            hours[staff.id][shift.weekday].append(shift)
+    return hours
+
+
+def _day_slots(service, staff_members, day: date, hours, busy, earliest, latest) -> list[Slot]:
+    """Open slots on one local day. Pure computation: everything it needs is passed in."""
+    tz = business_tz()
+    step = timedelta(minutes=settings.SLOT_INTERVAL_MINUTES)
+    duration = service.duration
+    slots: list[Slot] = []
+    for staff in staff_members:
+        for shift in hours[staff.id][day.weekday()]:
+            shift_start = datetime.combine(day, shift.start_time, tzinfo=tz).astimezone(UTC)
+            shift_end = datetime.combine(day, shift.end_time, tzinfo=tz).astimezone(UTC)
+            cursor = shift_start
+            while cursor + duration <= shift_end:
+                slot_end = cursor + duration
+                if earliest <= cursor <= latest and not _overlaps_any(cursor, slot_end, busy[staff.id]):
+                    slots.append(Slot(cursor, slot_end, staff.id))
+                cursor += step
+    slots.sort(key=lambda s: (s.start, s.staff_id))
+    return slots
 
 
 def bookable_staff(service: Service, staff_id: int | None = None):
@@ -123,9 +133,30 @@ def bookable_staff(service: Service, staff_id: int | None = None):
 
 def next_available_slot(service: Service, search_days: int = 14) -> Slot | None:
     """The earliest open slot for a service with any staff member, looking `search_days` ahead."""
+    return next_available_slots([service], search_days)[service.id]
+
+
+def next_available_slots(services, search_days: int = 14) -> dict[int, Slot | None]:
+    """The earliest open slot for each service, in a fixed handful of queries however many services
+    there are: staff, hours, bookings and time off are loaded once, then searched in memory."""
+    services = list(services)
     today = timezone.now().astimezone(business_tz()).date()
-    by_day = compute_slots(service, bookable_staff(service), today, today + timedelta(days=search_days - 1))
-    return next((slots[0] for _, slots in sorted(by_day.items()) if slots), None)
+    days = [today + timedelta(days=i) for i in range(search_days)]
+    staff = list(StaffMember.objects.filter(is_active=True).prefetch_related("services", "working_hours"))
+    range_start, _ = local_day_bounds(days[0])
+    _, range_end = local_day_bounds(days[-1])
+    busy = _busy_intervals([s.id for s in staff], range_start, range_end)
+    hours = _hours_by_staff(staff)
+    earliest, latest = booking_window()
+
+    result: dict[int, Slot | None] = {}
+    for service in services:
+        offering = [s for s in staff if any(x.id == service.id for x in s.services.all())]
+        result[service.id] = next(
+            (slots[0] for day in days if (slots := _day_slots(service, offering, day, hours, busy, earliest, latest))),
+            None,
+        )
+    return result
 
 
 def is_slot_available(

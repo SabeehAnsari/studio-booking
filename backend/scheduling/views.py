@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from payments import services as payments
 
-from .availability import bookable_staff, business_tz, compute_slots, local_day_bounds
+from .availability import bookable_staff, business_tz, compute_slots, local_day_bounds, next_available_slots
 from .models import Appointment, Service, StaffMember
 from .permissions import IsBusinessAdmin, can_manage
 from .serializers import AppointmentSerializer, RescheduleSerializer, ServiceMenuSerializer, StaffMemberSerializer
@@ -51,7 +51,8 @@ class ServiceViewSet(viewsets.ReadOnlyModelViewSet):
         # Menu order: by category (in declaration order), then by name.
         category_order = {value: index for index, value in enumerate(Service.Category.values)}
         services = sorted(self.get_queryset(), key=lambda s: (category_order[s.category], s.name))
-        return Response(self.get_serializer(services, many=True).data)
+        context = {**self.get_serializer_context(), "next_available": next_available_slots(services)}
+        return Response(self.get_serializer(services, many=True, context=context).data)
 
 
 class StaffViewSet(viewsets.ReadOnlyModelViewSet):

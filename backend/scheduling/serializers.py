@@ -35,7 +35,9 @@ class ServiceMenuSerializer(ServiceSerializer):
         fields = [*ServiceSerializer.Meta.fields, "next_available"]
 
     def get_next_available(self, service):
-        slot = next_available_slot(service)
+        # The list view precomputes every service's opening in one pass (see ServiceViewSet.list).
+        precomputed = self.context.get("next_available")
+        slot = precomputed[service.id] if precomputed is not None else next_available_slot(service)
         return {"start": slot.start, "staff_id": slot.staff_id} if slot else None
 
 

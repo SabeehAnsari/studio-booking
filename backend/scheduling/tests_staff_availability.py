@@ -112,3 +112,39 @@ class TimeOffTests(BookingTestCase):
         day = self.monday.isoformat()
         self.post(self.staff_user, self.staff, f"{day}T09:00", f"{day}T10:00")
         self.assertEqual(WorkingHours.objects.filter(staff=self.staff).count(), 1)
+
+
+@override_settings(BUSINESS_TIMEZONE="America/New_York", DEMO_MODE=True)
+class DemoGuardrailTests(BookingTestCase):
+    """Shared demo accounts mustn't be able to leave the public demo unbookable."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.staff_user.email = "demo-staff@demo.example.com"
+        cls.staff_user.save()
+
+    def test_demo_staff_cannot_clear_all_their_hours(self):
+        response = self.client_for(self.staff_user).put(f"/api/staff/{self.staff.id}/hours/", {"hours": []}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("public demo", str(response.data))
+        self.assertEqual(self.staff.working_hours.count(), 1)
+
+    def test_demo_staff_cannot_take_more_than_a_week_off(self):
+        first = self.monday.isoformat()
+        last = (self.monday + timedelta(days=10)).isoformat()
+        response = self.client_for(self.staff_user).post(
+            f"/api/staff/{self.staff.id}/time-off/", {"start": f"{first}T00:00", "end": f"{last}T00:00"}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(TimeOff.objects.exists())
+
+    def test_real_accounts_are_not_limited(self):
+        # A real business (non-demo admin) can close a staff member's diary entirely.
+        response = self.client_for(self.admin).put(f"/api/staff/{self.staff.id}/hours/", {"hours": []}, format="json")
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(DEMO_MODE=False)
+    def test_guardrails_are_off_outside_demo_mode(self):
+        response = self.client_for(self.staff_user).put(f"/api/staff/{self.staff.id}/hours/", {"hours": []}, format="json")
+        self.assertEqual(response.status_code, 200)

@@ -51,12 +51,13 @@ export type AppointmentFilters = {
   page?: number
 }
 
-export function useAppointments(filters: AppointmentFilters = {}) {
+export function useAppointments(filters: AppointmentFilters = {}, options: { enabled?: boolean } = {}) {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== '') query.set(key, String(value))
   return useQuery({
     queryKey: ['appointments', filters],
     queryFn: () => api<Paginated<Appointment>>(`/appointments/?${query}`),
+    enabled: options.enabled ?? true,
   })
 }
 

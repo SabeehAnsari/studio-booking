@@ -3,8 +3,8 @@ import type { AppConfig } from '../api/types'
 import { useAuth } from '../auth/context'
 import { AppointmentList } from '../components/AppointmentList'
 import { Button, EmptyState, ErrorMessage, Loading, PageHeader } from '../components/ui'
-import { addDays, formatDay, formatPrice, todayIn } from '../lib/dates'
 import { useSearchParams } from 'react-router-dom'
+import { addDays, dayOf, formatDay, formatPrice, todayIn } from '../lib/dates'
 
 export function StaffSchedule() {
   const { data: config } = useConfig()
@@ -18,6 +18,10 @@ function Schedule({ config }: { config: AppConfig }) {
   const today = todayIn(config.timezone)
   const day = params.get('date') ?? today
   const appointments = useAppointments({ date: day })
+  // On an empty day, look ahead so the page can offer a jump to the next day with bookings.
+  const emptyDay = appointments.data?.results.length === 0
+  const upcoming = useAppointments({ scope: 'upcoming' }, { enabled: emptyDay })
+  const nextBookedDay = upcoming.data?.results.map((a) => dayOf(a.start, config.timezone)).find((d) => d > day)
   const setDay = (d: string) => setParams(d === today ? {} : { date: d }, { replace: true })
 
   const list = appointments.data?.results ?? []
@@ -65,7 +69,15 @@ function Schedule({ config }: { config: AppConfig }) {
       ) : appointments.error ? (
         <ErrorMessage error={appointments.error} />
       ) : list.length === 0 ? (
-        <EmptyState title="No appointments">Enjoy the quiet — or check another day.</EmptyState>
+        <EmptyState title="No appointments">
+          {nextBookedDay ? (
+            <Button variant="secondary" size="sm" className="mt-2" onClick={() => setDay(nextBookedDay)}>
+              Next booked day: {formatDay(nextBookedDay, { weekday: 'long', month: 'short', day: 'numeric' })} →
+            </Button>
+          ) : (
+            'Enjoy the quiet, or check another day.'
+          )}
+        </EmptyState>
       ) : (
         <AppointmentList appointments={list} role="staff" config={config} timeOnly />
       )}
