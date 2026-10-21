@@ -318,6 +318,8 @@ Then open http://localhost:5173/demo/owner (or `/demo/customer`, `/demo/staff`) 
 
 ## Configuration
 
+Every setting is documented, with safe local defaults, in [`backend/.env.example`](backend/.env.example) and [`frontend/.env.example`](frontend/.env.example). Copy the backend one to `backend/.env` to get started; empty values fall back to the defaults.
+
 | Variable | Used by | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | API | App connection (pooled) and migrations (direct) |
